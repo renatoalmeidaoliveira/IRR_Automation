@@ -1,0 +1,17 @@
+# created by virtualenv automatically
+__pycache__/
+*.py[cod]
+*$py.class
+
+.Python
+build/
+lib/
+lib64/
+etc/
+etc/
+share/
+bin/
+dist/
+*egg-info/
+*.ipynb_checkpoints
+*.ipynb

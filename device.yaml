@@ -1,0 +1,17 @@
+devices:
+    AS200:
+        type: 'EDGE-Router'
+        os: 'iosxe'
+        credentials:
+            default:                         # login credentials
+                username: 'developer'
+                password: 'C1sco12345'
+        connections:
+            netconf:
+                class: yang.connector.Netconf
+                ip : "10.10.20.176"
+                port: 830
+            vty:
+                protocol: ssh
+                ip: "10.10.20.176"
+
