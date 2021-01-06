@@ -1,8 +1,8 @@
 from pyats import aetest
 from utils import (
-    createBackup,
-    getLastBackup,
-    rollbackDevice,)
+    create_backup,
+    get_backup_path,
+    restore_device,)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -27,21 +27,12 @@ class BaseSetup(aetest.CommonSetup):
     def backup_devices(self, testbed):
         for device in testbed:
             try:
-                createBackup(device)
+                create_backup(device)
+                backup_path = get_backup_path(device)
+                device.backup_path = backup_path
             except Exception as e:
                 self.errored(
                     reason=f"Failed Backup {device.name}",
-                    goto=['exit'],
-                    from_exception=e,)
-
-    @aetest.subsection
-    def set_backup_path(self, testbed):
-        for device in testbed:
-            try:
-                device.backup_path = getLastBackup(device)
-            except Exception as e:
-                self.errored(
-                    reason=f"Failed to set Backup path on {device.name}",
                     goto=['exit'],
                     from_exception=e,)
 
@@ -60,11 +51,15 @@ class BaseCleanup(aetest.CommonCleanup):
     @aetest.subsection
     def rollback_all(self, testbed):
         if(self.parameters['rollback'] is True):
-            for device in testbed:
-                if(device.changed is True):
-                    backup_path = device.backup_path
-                    reply = rollbackDevice(device=device, path=backup_path)
-                    logger.info(reply)
+            try:
+                for device in testbed:
+                    if(device.changed is True):
+                        backup_path = device.backup_path
+                        restore_device(device, device.backup_path)
+            except Exception as e:
+                self.errored(
+                    reason=f"Failed to rollback {device.name}",
+                    from_exception=e,)
         else:
             self.skipped("All tests passed")
 

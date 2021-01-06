@@ -3,10 +3,13 @@ from base import (
     BaseSetup,
     BaseCleanup,)
 from utils import (
-    getASSet,
-    getASPrefixes,
-    createPrefixListPayload,
-    getConfiguredPrefixesFilter)
+    get_as_set,
+    get_as_set_prefixes,
+    create_prefix_list_payload,
+    get_configured_prefixes,
+    get_as_set_prefixes_list,
+    get_neighbor_installed_prefixes,
+    )
 import logging
 import xmltodict
 import time
@@ -16,163 +19,98 @@ class Setup(BaseSetup):
 
     @aetest.subsection
     def configure_prefix_list(self, testbed):
-        as_set = getASSet(asn=109)
-        prefixes = getASPrefixes(as_set, 4, aggregate=True)
-        payload = createPrefixListPayload(name=as_set, prefixes=prefixes)
-        for device in testbed:
-            try:
-                device.nc.edit_config(target='running', config=payload)
-                device.changed = True
-            except Exception as e:
-                device.failed = True
-                self.errored(
-                    reason=f"Failed to configure Prefix List on {device.name}",
-                    goto=['common_cleanup'],
-                    from_exception=e,)
+            for device in testbed:
+                try:
+                    for neighbor in device.custom['neighbors']:
+                        asn = neighbor['asn']
+                        as_set = get_as_set(asn)
+                        assert isinstance(as_set, str)
+                        assert as_set != ''
+
+                        prefixes = get_as_set_prefixes(as_set, 4 , aggregate=True)
+                        assert isinstance(prefixes, list)
+                        assert len(prefixes) > 0
+
+                        payload = create_prefix_list_payload(name=as_set, prefixes=prefixes)
+                        device.nc.edit_config(target='running', config=payload)
+                        device.changed = True
+                except Exception as e:
+                    device.failed = True
+                    self.errored(
+                            reason=f"Failed execution on {device} and ASN {asn}",
+                            goto=['common_cleanup'],
+                            from_exception=e,)
+                    
 
 
-class ConfigurationTest(aetest.Testcase):
+
+class configuration_tests(aetest.Testcase):
 
     @aetest.test
     def check_configured_object(self, testbed):
         for device in testbed:
-            try:
-                payload = getConfiguredPrefixesFilter(asn=109)
-                configured_prefixes = device.nc.get_config(
-                    source='running', filter=payload)
-                configObject = xmltodict.parse(configured_prefixes.data_xml)
-                conf_prefixes = configObject['data']['native']['ip']['prefix-list']['prefixes']['seq']
-                as_set = getASSet(asn=109)
-                expect_prefixes = getASPrefixes(as_set, 4, aggregate=True)
-                expected_len = 0
-                for prefix in expect_prefixes:
-                    existPrefix = False
-                    correctPrefix = False
-                    for confPrefix in conf_prefixes:
-                        if(prefix['exact'] is True):
-                            if (prefix['prefix'] == confPrefix['ip']) and \
-                               ('le' not in confPrefix) and \
-                               ('ge' not in confPrefix):
+            for neighbor in device.custom['neighbors']:
+                asn = neighbor['asn']
+                try:
+                    as_set = get_as_set(asn)
+                    assert isinstance(as_set, str)
+                    assert as_set != ''
 
-                                existPrefix = True
-                                correctPrefix = True
-                                conf_prefixes.remove(confPrefix)
-                                expected_len = expected_len + 1
-                        else:
-                            if prefix['prefix'] == confPrefix['ip']:
-                                existPrefix = True
-                                if('less-equal' in prefix):
-                                    if('le' in confPrefix):
-                                        if(str(prefix['less-equal']) == str(confPrefix['le'])):
-                                            correctPrefix = True
-                                if('greater-equal' in prefix):
-                                    if('ge' in confPrefix):
-                                        if(str(prefix['greater-equal']) == str(confPrefix['ge'])):
-                                            correctPrefix = True
-                                conf_prefixes.remove(confPrefix)
-                                expected_len = expected_len + 1
-                    assert (existPrefix is True)
-                    assert (correctPrefix is True)
-                assert expected_len == len(expect_prefixes)
-                assert len(conf_prefixes) == 0
-            except Exception as e:
-                device.failed = True
-                self.errored(
-                    reason=f"Incorrect configuration on {device.name}",
-                    goto=['common_cleanup'],
-                    from_exception=e,)
+                    expected_prefixes = get_as_set_prefixes(as_set, 4, aggregate=True)
+                    assert isinstance(expected_prefixes, list)
+                    assert len(expected_prefixes) > 0
+
+                    configured_prefixes = get_configured_prefixes(as_set, device)
+                    assert isinstance(configured_prefixes, list)
+                    assert len(configured_prefixes) > 0
+
+                    assert len(expected_prefixes) == len(configured_prefixes)
+
+                    for prefix in configured_prefixes:
+                        assert prefix in expected_prefixes
+                except Exception as e:
+                    device.failed = True
+                    self.errored(
+                        reason=f"Incorrect configuration on  {device} and ASN {asn}",
+                        goto=['common_cleanup'],
+                        from_exception=e,)
+         
 
     @aetest.test
     def wait_for_update(self, testbed):
         time.sleep(60)
 
     @aetest.test
-    def check_installed_prefixes_number(self, testbed):
-        for device in testbed:
-            try:
-                netconf_filter = """
-                    <filter>
-                      <bgp-state-data>
-                        <neighbors>
-                          <neighbor>
-                            <neighbor-id>{neighbor}</neighbor-id>
-                          </neighbor>
-                        </neighbors>
-                      </bgp-state-data>
-                    </filter>"""
-                reply = device.nc.get(
-                    filter=netconf_filter.format(neighbor="172.30.0.1"))
-                data = xmltodict.parse(reply.data_xml)
-                installedPrefixesNumber = data['data']['bgp-state-data']['neighbors']['neighbor']['prefix-activity']['received']['current-prefixes']
-                as_set = getASSet(asn=109)
-                expect_prefixes = getASPrefixes(as_set, 4)
-                assert int(installedPrefixesNumber) <= len(expect_prefixes)
-            except Exception as e:
-                device.failed = True
-                expected_len = len(expect_prefixes)
-                self.errored(
-                    reason=f"The number of installed prefixes {installedPrefixesNumber} is greater than expected {expected_len} on {device.name}",
-                    goto=['common_cleanup'],
-                    from_exception=e,)
-
-
-    @aetest.test
     def check_installed_prefixes(self, testbed):
         for device in testbed:
-            try:
-                as_set = getASSet(asn=109)
-                expect_prefixes = getASPrefixes(as_set, 4, aggregate=False)
-                netconf_filter = """
-                <filter>
-                  <bgp-state-data>
-                    <bgp-route-vrfs>
-                      <bgp-route-vrf>
-                        <bgp-route-afs>
-                          <bgp-route-af>
-                           <afi-safi>ipv4-unicast</afi-safi>
-                            <bgp-route-neighbors>
-                               <bgp-route-neighbor>
-                                 <nbr-id>{neighbor}</nbr-id>
-                               </bgp-route-neighbor>
-                            </bgp-route-neighbors>
-                          </bgp-route-af>
-                        </bgp-route-afs>
-                      </bgp-route-vrf>
-                    </bgp-route-vrfs>
-                  </bgp-state-data>
-                </filter>"""
-                reply = device.nc.get(
-                    filter=netconf_filter.format(neighbor="172.30.0.1"))
-                data = xmltodict.parse(reply.data_xml)
-                bgpRouteFilters = data['data']['bgp-state-data']['bgp-route-vrfs']['bgp-route-vrf']['bgp-route-afs']['bgp-route-af']['bgp-route-neighbors']['bgp-route-neighbor']['bgp-neighbor-route-filters']['bgp-neighbor-route-filter']
-                if('bgp-neighbor-route-entries' in bgpRouteFilters):                    
-                    prefixes = bgpRouteFilters['bgp-neighbor-route-entries']['bgp-neighbor-route-entry']
-                    istalledPrefixes = []
-                    if(isinstance(prefixes, list)):
-                        for prefix in prefixes:
-                            istalledPrefixes.append(prefix['prefix'])
-                    else:
-                        istalledPrefixes.append(prefixes['prefix'])
-                    expect_prefixes_list = []
-                    for prefix in expect_prefixes:
-                        expect_prefixes_list.append(prefix['prefix'])
-                    existIncorrectPrefix = False
-                    logger.info(expect_prefixes_list)
-                    logger.info(istalledPrefixes)
-                    for prefix in istalledPrefixes:
-                        if prefix not in expect_prefixes_list:
-                            logger.info(prefix)
-                            existIncorrectPrefix = True
-                    assert existIncorrectPrefix is not True
-                else:
-                    self.passx(reason="No prefix Installed")
-            except Exception as e:
-                device.failed = True
-                self.errored(
-                    reason=f"Found unexpected prefix on {device.name}",
-                    goto=['common_cleanup'],
-                    from_exception=e,)
+            for neighbor in device.custom['neighbors']:
+                try:
 
+                    remote_address = neighbor['remote_address']
+                    asn = neighbor['asn']
+
+                    as_set = get_as_set(asn)
+                    assert isinstance(as_set, str)
+                    assert as_set != ''
+
+                    expected_prefixes = get_as_set_prefixes_list(as_set, 4)
+                    assert isinstance(expected_prefixes, list)
+                    assert len(expected_prefixes) > 0
+
+                    installed_prefixes = get_neighbor_installed_prefixes(device, 'ipv4-unicast', remote_address)
+                    assert isinstance(installed_prefixes, list)
+
+                    assert len(expected_prefixes) >= len(installed_prefixes)
+
+                    for prefix in installed_prefixes:
+                        assert prefix in expected_prefixes
+
+                except Exception as e:
+                    device.failed = True
+                    self.errored(
+                        reason=f"Incorrect prefixes of {remote_address} on {device}",
+                        goto=['common_cleanup'],
+                        from_exception=e,)
 
 class Cleanup(BaseCleanup):
     pass

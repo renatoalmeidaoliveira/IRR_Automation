@@ -2,6 +2,10 @@ devices:
     AS200:
         type: 'EDGE-Router'
         os: 'iosxe'
+        custom:
+            neighbors:
+                - remote_address: 172.30.0.1
+                  asn: 109
         credentials:
             default:                         # login credentials
                 username: 'developer'
